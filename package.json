@@ -1,0 +1,47 @@
+{
+  "name": "vendor-admin-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Vendor Admin Bazaar and Bazar Story",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "build": "echo 'Build completed'",
+    "test": "echo 'Tests not implemented yet'"
+  },
+  "keywords": [
+    "vendor",
+    "admin",
+    "ecommerce",
+    "livestream"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.58.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.2.1",
+    "helmet": "^7.1.0",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.4",
+    "node-media-server": "^2.6.0",
+    "nodemailer": "^6.9.7",
+    "simple-peer": "^9.11.1",
+    "socket.io": "^4.8.1",
+    "supabase": "^1.100.0",
+    "twilio": "^4.19.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "nodemon": "^3.0.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
