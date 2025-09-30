@@ -1,0 +1,58 @@
+name: Build and Deploy to Docker Hub
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v2
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./Dockerfile # Adjust if Dockerfile is in the root directory
+          push: true
+          tags: aayushsharma100/bazarvv:latest # Ensure we push the :latest tag that we deploy
+
+      - name: Verify Pushed Image
+        run: docker pull aayushsharma100/bazarvv:latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            sudo docker image prune -f
+            sudo docker pull aayushsharma100/bazarvv:latest
+            sudo docker stop bazarvv || true
+            sudo docker rm bazarvv || true
+            sudo docker run -d --name bazarvv --restart always -p 5000:5000 \
+              -e SUPABASE_URL="${{ secrets.SUPABASE_URL }}" -e SUPABASE_ANON_KEY="${{ secrets.SUPABASE_ANON_KEY }}" \
+              -e SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" -e PORT="${{ secrets.PORT }}" \
+              -e NODE_ENV="${{ secrets.NODE_ENV }}" -e FRONTEND_URL="${{ secrets.FRONTEND_URL }}" \
+              -e JWT_SECRET="${{ secrets.JWT_SECRET }}" -e JWT_EXPIRES_IN="${{ secrets.JWT_EXPIRES_IN }}" \
+              -e EMAIL_USER="${{ secrets.EMAIL_USER }}" -e EMAIL_PASS="${{ secrets.EMAIL_PASS }}" \
+              -e SUPABASE_DB_PASSWORD="${{ secrets.SUPABASE_DB_PASSWORD }}" \
+              -e AGORA_APP_ID="${{ secrets.AGORA_APP_ID }}" -e AGORA_APP_CERTIFICATE="${{ secrets.AGORA_APP_CERTIFICATE }}" \
+              -e MAX_FILE_SIZE="${{ secrets.MAX_FILE_SIZE }}" -e UPLOAD_PATH="${{ secrets.UPLOAD_PATH }}" \
+              -e RTMP_PORT="${{ secrets.RTMP_PORT }}" -e HTTP_PORT="${{ secrets.HTTP_PORT }}" \
+              -e STREAM_BASE_URL="${{ secrets.STREAM_BASE_URL }}" -e CORS_ORIGIN="${{ secrets.CORS_ORIGIN }}" \
+              aayushsharma100/bazarvv:latest
