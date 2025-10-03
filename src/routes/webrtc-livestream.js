@@ -36,25 +36,54 @@ router.get('/', async (req, res) => {
           profile_image,
           city,
           state
+        ),
+        products(
+          id,
+          name,
+          price,
+          discount_price,
+          images
         )
       `)
       .in('stream_key', streamKeys)
       .eq('status', 'live');
 
     if (error) {
+      console.error('❌ Database error:', error);
       throw error;
     }
 
-    // Merge WebRTC data with database data
-    const mergedStreams = activeStreams.map(stream => {
+    // Merge WebRTC data with database data and manually fetch product data
+    const mergedStreams = await Promise.all(activeStreams.map(async (stream) => {
       const dbStream = dbStreams.find(s => s.stream_key === stream.streamKey);
+      
+      // If stream has product_id but no product data, fetch it manually
+      let productData = dbStream?.product;
+      if (dbStream?.product_id && !productData) {
+        try {
+          const { data: product, error: productError } = await supabase
+            .from('products')
+            .select('id, name, price, discount_price, images')
+            .eq('id', dbStream.product_id)
+            .single();
+          
+          if (product && !productError) {
+            productData = product;
+          }
+        } catch (error) {
+          // Silently handle error - product data will remain null
+        }
+      }
+      
       return {
         ...stream,
         ...dbStream,
+        product: productData,
         current_viewers: stream.viewerCount,
         is_webrtc: true
       };
-    });
+    }));
+
 
     res.json({
       success: true,
@@ -471,6 +500,45 @@ router.delete('/:streamId', authenticateToken, requireRole('vendor'), async (req
     res.status(500).json({
       success: false,
       message: 'Failed to delete stream'
+    });
+  }
+});
+
+// Update livestream with product_id (for testing)
+router.patch('/:streamId/product', async (req, res) => {
+  try {
+    const { streamId } = req.params;
+    const { product_id } = req.body;
+
+    if (!product_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'product_id is required'
+      });
+    }
+
+    const { data: updatedStream, error } = await supabase
+      .from('livestreams')
+      .update({ product_id })
+      .eq('id', streamId)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    res.json({
+      success: true,
+      message: 'Livestream updated with product successfully',
+      data: updatedStream
+    });
+
+  } catch (error) {
+    console.error('Update livestream product error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update livestream with product'
     });
   }
 });
