@@ -7,9 +7,52 @@ class WebRTCService {
   }
 
   initialize(server) {
+    // CORS configuration for both local development and production deployment
+    const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
+      'http://localhost:3000', 
+      'http://localhost:3001', 
+      'http://localhost:3002',
+      'http://localhost:5000'
+    ];
+
+    // Add Vercel domains for production
+    if (process.env.NODE_ENV === 'production') {
+      allowedOrigins.push(
+        'https://vendor-t6gl.vercel.app',
+        'https://truulu.vercel.app'
+      );
+    }
+
     this.io = new Server(server, {
       cors: {
-        origin: ["http://localhost:3000", "http://localhost:3001"],
+        origin: function (origin, callback) {
+          // Allow requests with no origin (mobile apps, Postman, etc.)
+          if (!origin) return callback(null, true);
+          
+          // Always allow localhost in development
+          if (process.env.NODE_ENV !== 'production' && origin.includes('localhost')) {
+            return callback(null, true);
+          }
+          
+          // Check if origin is in allowed list
+          if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+          }
+          
+          // For Vercel preview deployments, allow any *.vercel.app domain
+          if (process.env.NODE_ENV === 'production' && origin.includes('.vercel.app')) {
+            return callback(null, true);
+          }
+          
+          // For production, be more restrictive
+          if (process.env.NODE_ENV === 'production') {
+            console.log(`WebRTC CORS blocked origin: ${origin}`);
+            return callback(new Error('Not allowed by CORS'));
+          }
+          
+          // In development, allow most origins for easier testing
+          return callback(null, true);
+        },
         methods: ["GET", "POST"],
         credentials: true
       }
