@@ -23,7 +23,9 @@ const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || [
 if (process.env.NODE_ENV === 'production') {
   allowedOrigins.push(
     'https://vendor-admin-bazaar.vercel.app',
-    'https://bazar-story.vercel.app'
+    'https://bazar-story.vercel.app',
+    'https://vendor-t6gl.vercel.app',
+    'https://truulu.vercel.app'
   );
 }
 
