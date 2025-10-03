@@ -26,7 +26,7 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: ./docker/Dockerfile # Adjust if Dockerfile is in the root directory
+          file: ./Dockerfile # Adjust if Dockerfile is in the root directory
           push: true
           tags: aayushsharma100/bazarvv:latest # Ensure we push the :latest tag that we deploy
 
