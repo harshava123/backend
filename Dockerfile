@@ -1,27 +1,25 @@
-# Dockerfile for AWS deployment
-FROM node:18-alpine
+# Use an official Node.js runtime as the base image
+FROM node:20-alpine
 
-# Set working directory
-WORKDIR /app
+RUN apk add --no-cache openssl
 
-# Copy package files
+# Set the working directory
+WORKDIR /usr/src/app
+
+# Copy package.json and package-lock.json
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm ci || npm install
 
-# Copy source code
+# Copy the Prisma schema and generate the Prisma client
+# RUN cd src/db && npx prisma generate && cd ../..
+
+# Copy the rest of the application code
 COPY . .
 
-# Create uploads directory
-RUN mkdir -p uploads
-
-# Expose port
+# Expose the port the app runs on
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:5000/api/health || exit 1
-
-# Start the application
+# Command to run the application
 CMD ["npm", "start"]

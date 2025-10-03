@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { createClient } = require('@supabase/supabase-js');
-const { authenticateToken, requireRole } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 // Initialize Supabase client
@@ -36,54 +36,25 @@ router.get('/', async (req, res) => {
           profile_image,
           city,
           state
-        ),
-        products(
-          id,
-          name,
-          price,
-          discount_price,
-          images
         )
       `)
       .in('stream_key', streamKeys)
       .eq('status', 'live');
 
     if (error) {
-      console.error('❌ Database error:', error);
       throw error;
     }
 
-    // Merge WebRTC data with database data and manually fetch product data
-    const mergedStreams = await Promise.all(activeStreams.map(async (stream) => {
+    // Merge WebRTC data with database data
+    const mergedStreams = activeStreams.map(stream => {
       const dbStream = dbStreams.find(s => s.stream_key === stream.streamKey);
-      
-      // If stream has product_id but no product data, fetch it manually
-      let productData = dbStream?.product;
-      if (dbStream?.product_id && !productData) {
-        try {
-          const { data: product, error: productError } = await supabase
-            .from('products')
-            .select('id, name, price, discount_price, images')
-            .eq('id', dbStream.product_id)
-            .single();
-          
-          if (product && !productError) {
-            productData = product;
-          }
-        } catch (error) {
-          // Silently handle error - product data will remain null
-        }
-      }
-      
       return {
         ...stream,
         ...dbStream,
-        product: productData,
         current_viewers: stream.viewerCount,
         is_webrtc: true
       };
-    }));
-
+    });
 
     res.json({
       success: true,
@@ -126,7 +97,7 @@ router.post('/create',
         });
       }
 
-      const { title, description, product_id } = req.body;
+      const { title, description } = req.body;
       const userId = req.user.id;
 
       // Get vendor profile to get vendor_id
@@ -148,53 +119,23 @@ router.post('/create',
       const streamId = `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
       // Create stream record in database
-      const streamData = {
-        vendor_id: vendorProfile.id,
-        title: title,
-        description: description,
-        stream_key: streamKey,
-        status: 'scheduled',
-        rtmp_url: null, // No RTMP for WebRTC
-        hls_url: null,  // No HLS for WebRTC
-        dash_url: null, // No DASH for WebRTC
-        created_at: new Date().toISOString()
-      };
-
-      // Add product_id if provided (only if column exists)
-      if (product_id) {
-        streamData.product_id = product_id;
-      }
-
       const { data: newStream, error: insertError } = await supabase
         .from('livestreams')
-        .insert(streamData)
+        .insert({
+          vendor_id: vendorProfile.id,
+          title: title,
+          description: description,
+          stream_key: streamKey,
+          status: 'scheduled',
+          rtmp_url: null, // No RTMP for WebRTC
+          hls_url: null,  // No HLS for WebRTC
+          dash_url: null, // No DASH for WebRTC
+          created_at: new Date().toISOString()
+        })
         .select()
         .single();
 
       if (insertError) {
-        // Check if error is due to missing product_id column
-        if (insertError.message && insertError.message.includes('product_id')) {
-          console.log('⚠️ product_id column not found, creating stream without product association');
-          
-          // Remove product_id and try again
-          delete streamData.product_id;
-          const { data: retryStream, error: retryError } = await supabase
-            .from('livestreams')
-            .insert(streamData)
-            .select()
-            .single();
-            
-          if (retryError) {
-            throw retryError;
-          }
-          
-          return res.json({
-            success: true,
-            message: 'WebRTC stream created successfully (product_id column not available)',
-            data: retryStream
-          });
-        }
-        
         throw insertError;
       }
 
@@ -232,7 +173,6 @@ router.get('/vendor/my-streams', authenticateToken, async (req, res) => {
     }
 
     const userId = req.user.id;
-    const { product_id } = req.query; // Get product_id from query parameters
     
     // Get vendor profile to get vendor_id
     const { data: vendorProfile, error: vendorError } = await supabase
@@ -248,20 +188,11 @@ router.get('/vendor/my-streams', authenticateToken, async (req, res) => {
       });
     }
 
-    // Build query with optional product_id filter
-    let query = supabase
+    const { data, error } = await supabase
       .from('livestreams')
       .select('*')
       .eq('vendor_id', vendorProfile.id)
       .order('created_at', { ascending: false });
-
-    // Filter by product_id if provided
-    if (product_id) {
-      // Try to filter by product_id, but handle case where column doesn't exist
-      query = query.eq('product_id', product_id);
-    }
-
-    const { data, error } = await query;
 
     if (error) {
       throw error;
@@ -428,117 +359,6 @@ router.post('/:streamKey/end', authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to end WebRTC stream'
-    });
-  }
-});
-
-// Delete WebRTC stream
-router.delete('/:streamId', authenticateToken, requireRole('vendor'), async (req, res) => {
-  try {
-    const { streamId } = req.params;
-    const userId = req.user.id;
-
-    // Get vendor profile
-    const { data: vendorProfile, error: vendorError } = await supabase
-      .from('vendor_profiles')
-      .select('id')
-      .eq('user_id', userId)
-      .single();
-
-    if (vendorError || !vendorProfile) {
-      return res.status(404).json({
-        success: false,
-        message: 'Vendor profile not found'
-      });
-    }
-
-    // Check if stream exists and belongs to vendor
-    const { data: stream, error: streamError } = await supabase
-      .from('livestreams')
-      .select('id, title, vendor_id')
-      .eq('id', streamId)
-      .eq('vendor_id', vendorProfile.id)
-      .single();
-
-    if (streamError || !stream) {
-      return res.status(404).json({
-        success: false,
-        message: 'Stream not found or does not belong to vendor'
-      });
-    }
-
-    // Check if stream is currently active
-    if (stream.status === 'live') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete an active stream. Please end the stream first.'
-      });
-    }
-
-    // Delete the stream
-    const { error: deleteError } = await supabase
-      .from('livestreams')
-      .delete()
-      .eq('id', streamId)
-      .eq('vendor_id', vendorProfile.id);
-
-    if (deleteError) {
-      console.error('Delete stream error:', deleteError);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to delete stream'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: `Stream "${stream.title}" deleted successfully`
-    });
-
-  } catch (error) {
-    console.error('Delete stream error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete stream'
-    });
-  }
-});
-
-// Update livestream with product_id (for testing)
-router.patch('/:streamId/product', async (req, res) => {
-  try {
-    const { streamId } = req.params;
-    const { product_id } = req.body;
-
-    if (!product_id) {
-      return res.status(400).json({
-        success: false,
-        message: 'product_id is required'
-      });
-    }
-
-    const { data: updatedStream, error } = await supabase
-      .from('livestreams')
-      .update({ product_id })
-      .eq('id', streamId)
-      .select()
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    res.json({
-      success: true,
-      message: 'Livestream updated with product successfully',
-      data: updatedStream
-    });
-
-  } catch (error) {
-    console.error('Update livestream product error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to update livestream with product'
     });
   }
 });

@@ -1,7 +1,7 @@
 const multer = require('multer');
 const path = require('path');
 
-// Use memory storage instead of disk for Supabase uploads
+// Use memory storage instead of disk for AWS S3 uploads
 const storage = multer.memoryStorage();
 
 // File filter

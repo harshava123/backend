@@ -84,7 +84,7 @@ router.get('/', async (req, res) => {
     const { count } = await supabase
       .from('products')
       .select('*', { count: 'exact', head: true })
-      .eq('is_active', true);
+      .eq('status', 'active');
 
     res.json({
       success: true,
@@ -119,10 +119,10 @@ router.get('/:id', async (req, res) => {
           id,
           name,
           description
-        )
+        ),
       `)
       .eq('id', id)
-      .eq('is_active', true)
+      .eq('status', 'active')
       .single();
 
     if (error || !product) {
@@ -158,24 +158,9 @@ router.post('/', authenticateToken, requireRole('vendor'), async (req, res) => {
       });
     }
 
-    // Get vendor profile ID from user ID
-    const { data: vendorProfile, error: vendorError } = await supabase
-      .from('vendor_profiles')
-      .select('id')
-      .eq('user_id', req.user.id)
-      .single();
-
-    if (vendorError || !vendorProfile) {
-      console.error('Vendor profile not found:', vendorError);
-      return res.status(404).json({
-        success: false,
-        message: 'Vendor profile not found. Please complete your vendor profile setup.'
-      });
-    }
-
     const productData = {
       ...value,
-      vendor_id: vendorProfile.id
+      vendor_id: req.user.id
     };
 
     const { data: product, error: createError } = await supabase
@@ -228,18 +213,7 @@ router.put('/:id', authenticateToken, requireRole('vendor'), async (req, res) =>
       });
     }
 
-    // Resolve current vendor profile id for this user
-    const { data: vendorProfile, error: vendorErr } = await supabase
-      .from('vendor_profiles')
-      .select('id')
-      .eq('user_id', req.user.id)
-      .single();
-
-    if (vendorErr || !vendorProfile) {
-      return res.status(404).json({ success: false, message: 'Vendor profile not found' });
-    }
-
-    // Check if product belongs to this vendor
+    // Check if product belongs to vendor
     const { data: existingProduct, error: checkError } = await supabase
       .from('products')
       .select('vendor_id')
@@ -253,7 +227,7 @@ router.put('/:id', authenticateToken, requireRole('vendor'), async (req, res) =>
       });
     }
 
-    if (existingProduct.vendor_id !== vendorProfile.id) {
+    if (existingProduct.vendor_id !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'You can only update your own products'
@@ -301,18 +275,7 @@ router.delete('/:id', authenticateToken, requireRole('vendor'), async (req, res)
   try {
     const { id } = req.params;
 
-    // Resolve current vendor profile id for this user
-    const { data: vendorProfile, error: vendorErr } = await supabase
-      .from('vendor_profiles')
-      .select('id')
-      .eq('user_id', req.user.id)
-      .single();
-
-    if (vendorErr || !vendorProfile) {
-      return res.status(404).json({ success: false, message: 'Vendor profile not found' });
-    }
-
-    // Check if product belongs to this vendor
+    // Check if product belongs to vendor
     const { data: existingProduct, error: checkError } = await supabase
       .from('products')
       .select('vendor_id')
@@ -326,7 +289,7 @@ router.delete('/:id', authenticateToken, requireRole('vendor'), async (req, res)
       });
     }
 
-    if (existingProduct.vendor_id !== vendorProfile.id) {
+    if (existingProduct.vendor_id !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'You can only delete your own products'
@@ -407,40 +370,6 @@ router.get('/vendor/my-products', authenticateToken, requireRole('vendor'), asyn
       success: false,
       message: 'Internal server error'
     });
-  }
-});
-
-// Get vendor's products in a specific category
-router.get('/vendor/by-category/:categoryId', authenticateToken, requireRole('vendor'), async (req, res) => {
-  try {
-    const { categoryId } = req.params;
-
-    // Resolve current vendor profile id
-    const { data: vendorProfile, error: vendorErr } = await supabase
-      .from('vendor_profiles')
-      .select('id')
-      .eq('user_id', req.user.id)
-      .single();
-
-    if (vendorErr || !vendorProfile) {
-      return res.status(404).json({ success: false, message: 'Vendor profile not found' });
-    }
-
-    const { data: products, error } = await supabase
-      .from('products')
-      .select(`*, categories(id,name)`) 
-      .eq('vendor_id', vendorProfile.id)
-      .eq('category_id', categoryId)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      throw error;
-    }
-
-    res.json({ success: true, data: products });
-  } catch (error) {
-    console.error('Get vendor products by category error:', error);
-    res.status(500).json({ success: false, message: 'Failed to fetch products' });
   }
 });
 

@@ -1,59 +1,40 @@
 const express = require('express');
 const path = require('path');
-const AWS = require('aws-sdk');
+const fs = require('fs');
 const { authenticateToken } = require('../middleware/auth');
 const { verifyAdminToken } = require('./admin');
 const { uploadSingle, uploadMultiple, handleUploadError } = require('../middleware/upload');
 
 const router = express.Router();
 
-// Configure AWS S3
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION || 'ap-south-1'
-});
-
-const S3_BUCKET = process.env.AWS_S3_BUCKET || 'trullu-product-images';
-
-// Helper function to upload file to AWS S3
-const uploadToS3 = async (file, folder = 'uploads') => {
+// Helper function to convert file to base64 with compression
+const convertFileToBase64 = (filePath, mimeType) => {
   try {
-    const fileName = `${folder}/${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(file.originalname)}`;
+    const fileBuffer = fs.readFileSync(filePath);
+    const base64String = fileBuffer.toString('base64');
     
-    const params = {
-      Bucket: S3_BUCKET,
-      Key: fileName,
-      Body: file.buffer,
-      ContentType: file.mimetype,
-      // ACL removed - use bucket policy for public access instead
-      CacheControl: 'max-age=31536000' // Cache for 1 year
-    };
-
-    const result = await s3.upload(params).promise();
-
-    console.log(`✅ Uploaded to S3: ${result.Location}`);
-
-    return {
-      filename: fileName,
-      originalname: file.originalname,
-      size: file.size,
-      url: result.Location,
-      fullUrl: result.Location
-    };
+    // Log file size for debugging
+    const fileSizeKB = Math.round(fileBuffer.length / 1024);
+    const base64SizeKB = Math.round(base64String.length / 1024);
+    console.log(`📁 File size: ${fileSizeKB}KB, Base64 size: ${base64SizeKB}KB`);
+    
+    // If base64 is too large (>100KB), return a warning
+    if (base64String.length > 100000) {
+      console.warn(`⚠️ Large base64 string: ${base64SizeKB}KB. Consider image compression.`);
+    }
+    
+    return `data:${mimeType};base64,${base64String}`;
   } catch (error) {
-    console.error('Upload to S3 failed:', error);
-    throw new Error(`Failed to upload to S3: ${error.message}`);
+    console.error('Error converting file to base64:', error);
+    throw new Error('Failed to convert file to base64');
   }
 };
-
-// Note: All uploads now use AWS S3 instead of local filesystem or Supabase Storage
 
 // Upload single image (for profile, category, etc.)
 router.post('/single', authenticateToken, (req, res, next) => {
   const upload = uploadSingle('image');
   
-  upload(req, res, async (err) => {
+  upload(req, res, (err) => {
     if (err) {
       return handleUploadError(err, req, res, next);
     }
@@ -65,22 +46,18 @@ router.post('/single', authenticateToken, (req, res, next) => {
       });
     }
 
-    try {
-      // Upload to AWS S3
-      const uploadedFile = await uploadToS3(req.file, 'images');
-
-      res.json({
-        success: true,
-        message: 'File uploaded successfully to S3',
-        data: uploadedFile
-      });
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to upload file'
-      });
-    }
+    // Return file information
+    res.json({
+      success: true,
+      message: 'File uploaded successfully',
+      data: {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        url: `/uploads/${req.file.filename}`,
+        fullUrl: `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
+      }
+    });
   });
 });
 
@@ -88,7 +65,7 @@ router.post('/single', authenticateToken, (req, res, next) => {
 router.post('/multiple', authenticateToken, (req, res, next) => {
   const upload = uploadMultiple('images', 10);
   
-  upload(req, res, async (err) => {
+  upload(req, res, (err) => {
     if (err) {
       return handleUploadError(err, req, res, next);
     }
@@ -100,23 +77,20 @@ router.post('/multiple', authenticateToken, (req, res, next) => {
       });
     }
 
-    try {
-      // Upload all files to AWS S3
-      const uploadPromises = req.files.map(file => uploadToS3(file, 'products'));
-      const uploadedFiles = await Promise.all(uploadPromises);
+    // Process uploaded files
+    const uploadedFiles = req.files.map(file => ({
+      filename: file.filename,
+      originalname: file.originalname,
+      size: file.size,
+      url: `/uploads/${file.filename}`,
+      fullUrl: `${req.protocol}://${req.get('host')}/uploads/${file.filename}`
+    }));
 
-      res.json({
-        success: true,
-        message: 'Files uploaded successfully to S3',
-        data: uploadedFiles
-      });
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to upload files'
-      });
-    }
+    res.json({
+      success: true,
+      message: 'Files uploaded successfully',
+      data: uploadedFiles
+    });
   });
 });
 
@@ -124,7 +98,7 @@ router.post('/multiple', authenticateToken, (req, res, next) => {
 router.post('/product', authenticateToken, (req, res, next) => {
   const upload = uploadMultiple('product_images', 10);
   
-  upload(req, res, async (err) => {
+  upload(req, res, (err) => {
     if (err) {
       return handleUploadError(err, req, res, next);
     }
@@ -136,23 +110,20 @@ router.post('/product', authenticateToken, (req, res, next) => {
       });
     }
 
-    try {
-      // Upload all files to AWS S3
-      const uploadPromises = req.files.map(file => uploadToS3(file, 'products'));
-      const uploadedFiles = await Promise.all(uploadPromises);
+    // Process uploaded files
+    const uploadedFiles = req.files.map(file => ({
+      filename: file.filename,
+      originalname: file.originalname,
+      size: file.size,
+      url: `/uploads/${file.filename}`,
+      fullUrl: `${req.protocol}://${req.get('host')}/uploads/${file.filename}`
+    }));
 
-      res.json({
-        success: true,
-        message: 'Product images uploaded successfully to S3',
-        data: uploadedFiles
-      });
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to upload product images'
-      });
-    }
+    res.json({
+      success: true,
+      message: 'Product images uploaded successfully',
+      data: uploadedFiles
+    });
   });
 });
 
@@ -160,7 +131,7 @@ router.post('/product', authenticateToken, (req, res, next) => {
 router.post('/category', authenticateToken, (req, res, next) => {
   const upload = uploadSingle('category_image');
   
-  upload(req, res, async (err) => {
+  upload(req, res, (err) => {
     if (err) {
       return handleUploadError(err, req, res, next);
     }
@@ -172,30 +143,25 @@ router.post('/category', authenticateToken, (req, res, next) => {
       });
     }
 
-    try {
-      // Upload to AWS S3
-      const uploadedFile = await uploadToS3(req.file, 'categories');
-
-      res.json({
-        success: true,
-        message: 'Category image uploaded successfully to S3',
-        data: uploadedFile
-      });
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to upload category image'
-      });
-    }
+    res.json({
+      success: true,
+      message: 'Category image uploaded successfully',
+      data: {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        url: `/uploads/${req.file.filename}`,
+        fullUrl: `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
+      }
+    });
   });
 });
 
-// Upload category image (admin) - Uses AWS S3 + returns base64 for immediate preview
+// Upload category image (admin) - Returns base64
 router.post('/admin/category', verifyAdminToken, (req, res, next) => {
   const upload = uploadSingle('category_image');
   
-  upload(req, res, async (err) => {
+  upload(req, res, (err) => {
     if (err) {
       return handleUploadError(err, req, res, next);
     }
@@ -208,24 +174,32 @@ router.post('/admin/category', verifyAdminToken, (req, res, next) => {
     }
 
     try {
-      // Upload to AWS S3
-      const uploadedFile = await uploadToS3(req.file, 'categories');
+      // Convert file to base64
+      const base64Data = convertFileToBase64(req.file.path, req.file.mimetype);
       
-      // Also generate base64 for immediate preview (from buffer)
-      const base64Data = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+      // Clean up the temporary file
+      fs.unlinkSync(req.file.path);
       
       res.json({
         success: true,
-        message: 'Category image uploaded successfully to S3',
+        message: 'Category image uploaded successfully',
         data: {
-          ...uploadedFile,
+          filename: req.file.filename,
+          originalname: req.file.originalname,
+          size: req.file.size,
           mimeType: req.file.mimetype,
           base64: base64Data,
-          imageData: uploadedFile.fullUrl // Use S3 URL as primary
+          // Keep URL for backward compatibility if needed
+          url: `/uploads/${req.file.filename}`,
+          fullUrl: `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
         }
       });
     } catch (error) {
       console.error('Error processing image:', error);
+      // Clean up the temporary file if base64 conversion fails
+      if (req.file && req.file.path) {
+        fs.unlinkSync(req.file.path);
+      }
       res.status(500).json({
         success: false,
         message: 'Failed to process image'
@@ -238,7 +212,7 @@ router.post('/admin/category', verifyAdminToken, (req, res, next) => {
 router.post('/profile', authenticateToken, (req, res, next) => {
   const upload = uploadSingle('profile_image');
   
-  upload(req, res, async (err) => {
+  upload(req, res, (err) => {
     if (err) {
       return handleUploadError(err, req, res, next);
     }
@@ -250,50 +224,49 @@ router.post('/profile', authenticateToken, (req, res, next) => {
       });
     }
 
-    try {
-      // Upload to AWS S3
-      const uploadedFile = await uploadToS3(req.file, 'profiles');
-
-      res.json({
-        success: true,
-        message: 'Profile image uploaded successfully to S3',
-        data: uploadedFile
-      });
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message || 'Failed to upload profile image'
-      });
-    }
+    res.json({
+      success: true,
+      message: 'Profile image uploaded successfully',
+      data: {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        url: `/uploads/${req.file.filename}`,
+        fullUrl: `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
+      }
+    });
   });
 });
 
-// Delete uploaded file from AWS S3
-router.delete('/:filename', authenticateToken, async (req, res) => {
+// Delete uploaded file
+router.delete('/:filename', authenticateToken, (req, res) => {
   const filename = req.params.filename;
+  const filePath = path.join(__dirname, '../../uploads', filename);
 
-  try {
-    const params = {
-      Bucket: S3_BUCKET,
-      Key: filename
-    };
+  // Check if file exists
+  const fs = require('fs');
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({
+      success: false,
+      message: 'File not found'
+    });
+  }
 
-    await s3.deleteObject(params).promise();
-
-    console.log(`✅ Deleted from S3: ${filename}`);
+  // Delete file
+  fs.unlink(filePath, (err) => {
+    if (err) {
+      console.error('File deletion error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete file'
+      });
+    }
 
     res.json({
       success: true,
-      message: 'File deleted successfully from S3'
+      message: 'File deleted successfully'
     });
-  } catch (error) {
-    console.error('S3 deletion error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete file from S3'
-    });
-  }
+  });
 });
 
 module.exports = router;
